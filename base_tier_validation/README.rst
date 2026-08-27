@@ -125,6 +125,17 @@ improvement will be very valuable.
 Changelog
 =========
 
+19.0.1.0.7 (2026-08-27)
+-----------------------
+
+Performance fix:
+
+- Resolving the lowest still-open review sequence no longer browses each
+  underlying record one at a time. Both the promotion check and the
+  ``can_review`` compute now group over ``tier.review`` in a single
+  query, so the cost of a systray recount no longer grows with the
+  reviewer's backlog.
+
 19.0.1.0.6 (2026-08-27)
 -----------------------
 

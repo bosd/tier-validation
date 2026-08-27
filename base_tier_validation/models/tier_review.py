@@ -91,10 +91,54 @@ class TierReview(models.Model):
             )
             review.reviewed_formated_date = reviewed_date_tz.replace(tzinfo=None)
 
+    @api.model
+    def _min_open_sequence_by_record(self, targets, statuses=("waiting", "pending")):
+        """Lowest still-open review sequence per ``(model, res_id)``, in one query.
+
+        The callers below run on every systray recount. Resolving the minimum by
+        browsing each underlying record and walking its ``review_ids`` cost a
+        query per record, which is what made ``review_user_count`` scale with a
+        reviewer's backlog. Group over ``tier.review`` instead: the o2m is just
+        ``(model, res_id)``, so the answer is one aggregate away.
+        """
+        result = {}
+        targets = {(model, res_id) for model, res_id in targets if model and res_id}
+        if not targets:
+            return result
+        groups = self._read_group(
+            domain=[
+                ("status", "in", list(statuses)),
+                ("model", "in", list({model for model, _res_id in targets})),
+                ("res_id", "in", list({res_id for _model, res_id in targets})),
+            ],
+            groupby=["model", "res_id"],
+            aggregates=["sequence:min"],
+        )
+        for model, res_id, min_sequence in groups:
+            # The domain is a cross-product of the models and ids involved, so
+            # it can return pairs nobody asked about; keep only real targets.
+            if (model, res_id) in targets:
+                result[(model, res_id)] = min_sequence
+        return result
+
     @api.depends("status", "approve_sequence", "sequence", "model", "res_id")
     def _compute_can_review(self):
+        # Same value as ``_can_review_value()`` per record, without that
+        # method's per-record browse of the underlying document.
+        min_pending = self._min_open_sequence_by_record(
+            {(rev.model, rev.res_id) for rev in self.filtered("approve_sequence")},
+            statuses=("pending",),
+        )
         for record in self:
-            record.can_review = record._can_review_value()
+            if record.status not in ("pending", "waiting"):
+                record.can_review = False
+            elif not record.approve_sequence:
+                record.can_review = True
+            else:
+                min_sequence = min_pending.get((record.model, record.res_id))
+                record.can_review = (
+                    min_sequence is None or record.sequence == min_sequence
+                )
 
     def _update_review_status(self):
         """Promote reviews that are currently available to pending."""
@@ -113,14 +157,9 @@ class TierReview(models.Model):
         # ``review_user_count`` calling ``user.review_ids._update_review_status()``
         # for a second-tier reviewer (their own review is then the only -- and
         # thus "minimum" -- sequence in the set, so it wrongly goes ``pending``).
-        min_seq_by_record = {}
-        for model, res_id in {(rev.model, rev.res_id) for rev in reviews}:
-            open_reviews = (
-                self.env[model]
-                .browse(res_id)
-                .review_ids.filtered(lambda r: r.status in ("waiting", "pending"))
-            )
-            min_seq_by_record[(model, res_id)] = min(open_reviews.mapped("sequence"))
+        min_seq_by_record = self._min_open_sequence_by_record(
+            {(rev.model, rev.res_id) for rev in reviews}
+        )
         for record in reviews:
             if record.status != "waiting":
                 continue
