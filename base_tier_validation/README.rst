@@ -125,6 +125,18 @@ improvement will be very valuable.
 Changelog
 =========
 
+19.0.1.0.6 (2026-08-27)
+-----------------------
+
+Performance fix:
+
+- The systray review counter no longer recounts once per bus
+  notification. Approving a batch of documents notifies every reviewer,
+  and each recount costs a few queries per pending review, so a bulk
+  approval could occupy every HTTP worker. Bus notifications are now
+  coalesced (15s, leading + trailing) and concurrent recounts can no
+  longer stack.
+
 19.0.1.0.3 (2026-05-13)
 -----------------------
 
