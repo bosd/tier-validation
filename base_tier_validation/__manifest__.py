@@ -3,7 +3,7 @@
 {
     "name": "Base Tier Validation",
     "summary": "Implement a validation process based on tiers.",
-    "version": "19.0.1.0.5",
+    "version": "19.0.1.0.8",
     "development_status": "Mature",
     "maintainers": ["LoisRForgeFlow"],
     "category": "Tools",
