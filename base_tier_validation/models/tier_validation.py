@@ -891,10 +891,11 @@ class TierValidation(models.AbstractModel):
             # Reviews already gone (deletions): refresh the acting user only.
             reviewers = self.env.user
         for reviewer in reviewers:
-            reviewer.partner_id._bus_send(
-                channel,
-                {"groups": reviewer.sudo()._review_user_count_groups()},
-            )
+            # Compute each reviewer's count *as that reviewer* (with_user), so
+            # their own record rules apply -- no superuser bypass. Deduped above
+            # (mapped), so this runs once per distinct reviewer, not per record.
+            groups = reviewer.with_user(reviewer)._review_user_count_groups()
+            reviewer.partner_id._bus_send(channel, {"groups": groups})
 
     def unlink(self):
         self.mapped("review_ids").unlink()

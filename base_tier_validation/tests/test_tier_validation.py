@@ -1641,3 +1641,15 @@ class TierTierValidationView(CommonTierValidation):
         groups = reviewer._review_user_count_groups()
         total = sum(g["pending_count"] for g in groups)
         self.assertEqual(total, 1, "the promoted reviewer's systray count must be 1")
+        # Negative case: a reviewer still waiting on a lower tier sees 0.
+        waiting = reviews.filtered(
+            lambda r: r.status == "waiting" and r.reviewer_ids != reviewer
+        )
+        if waiting:
+            waiting_reviewer = waiting.reviewer_ids[:1]
+            wg = waiting_reviewer._review_user_count_groups()
+            self.assertEqual(
+                sum(g["pending_count"] for g in wg),
+                0,
+                "a reviewer waiting on a lower tier must see 0",
+            )

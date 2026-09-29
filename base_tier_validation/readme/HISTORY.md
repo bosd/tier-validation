@@ -1,3 +1,10 @@
+## 19.0.1.1.1 (2026-09-29)
+
+- Review follow-ups on the bus-payload counter: guard against a `tier.review`
+  whose model was uninstalled (skip instead of KeyError-crashing the systray);
+  compute each reviewer's count with `with_user(reviewer)` (their own record
+  rules) instead of `sudo()`; test the non-promoted (waiting) reviewer sees 0.
+
 ## 19.0.1.1.0 (2026-09-29)
 
 - Reviewer systray counter is now updated from the bus **payload** (each

@@ -31,16 +31,17 @@ class Users(models.Model):
             & Domain("can_review", "=", True)
             & Domain("id", "in", user.review_ids.ids)
         )
-        review_groups = (
-            self.env["tier.review"]
-            .sudo()
-            ._read_group(
-                domain=domain,
-                groupby=["model"],
-                aggregates=["id:recordset"],
-            )
+        review_groups = self.env["tier.review"]._read_group(
+            domain=domain,
+            groupby=["model"],
+            aggregates=["id:recordset"],
         )
         for model, tier_review in review_groups:
+            # A tier.review can outlive its model (its module was uninstalled but
+            # the rows remain); skip those instead of crashing the whole systray
+            # with a KeyError on ``self.env[model]``.
+            if model not in self.env:
+                continue
             Model = self.env[model]
             # Skip Models not having Tier Validation enabled (example: was unistalled)
             if tier_review and hasattr(Model, "can_review"):
