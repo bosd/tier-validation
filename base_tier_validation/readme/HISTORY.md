@@ -1,3 +1,11 @@
+## 19.0.1.1.0 (2026-09-29)
+
+- Reviewer systray counter is now updated from the bus **payload** (each
+  reviewer receives their authoritative count on any review change) instead of
+  every open tab firing a recount RPC. Realtime and burst-safe (the recount
+  fan-out previously starved workers on bulk approvals). Mirrors how Odoo core
+  systray counters work.
+
 ## 19.0.1.0.7 (2026-08-27)
 
 Performance fix:

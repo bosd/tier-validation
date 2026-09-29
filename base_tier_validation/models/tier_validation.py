@@ -879,18 +879,22 @@ class TierValidation(models.AbstractModel):
     def _update_counter(self, review_counter):
         self.review_ids._update_review_status()
         channel = "base.tier.validation/updated"
-        # Notify the reviewers whose pending count actually changes, not the
-        # acting user. Sending the delta to ``self.env.user`` made unrelated
-        # users' systray counters drift (even negative) whenever someone acted
-        # on a tier-validated record without being one of its reviewers. When
-        # the reviews are already gone (deletions), fall back to the acting
-        # user. The client recomputes the absolute count on receipt, so the
-        # exact audience only affects how promptly a reviewer sees the update.
-        partners = self.review_ids.mapped("reviewer_ids.partner_id")
-        if not partners:
-            partners = self.env.user.partner_id
-        for partner in partners:
-            partner._bus_send(channel, review_counter)
+        # Push each affected reviewer their authoritative systray count in the
+        # bus payload, so the client updates the badge straight from the message
+        # instead of every open tab firing an expensive recount RPC (that
+        # fan-out starved the HTTP workers on bulk approvals). The audience is
+        # deduped to the reviewers whose count can change, and the count reads
+        # the stored ``can_review`` -- cheap and burst-safe. ``review_counter``
+        # is kept for signature/back-compat but no longer carries the value.
+        reviewers = self.review_ids.mapped("reviewer_ids")
+        if not reviewers:
+            # Reviews already gone (deletions): refresh the acting user only.
+            reviewers = self.env.user
+        for reviewer in reviewers:
+            reviewer.partner_id._bus_send(
+                channel,
+                {"groups": reviewer.sudo()._review_user_count_groups()},
+            )
 
     def unlink(self):
         self.mapped("review_ids").unlink()

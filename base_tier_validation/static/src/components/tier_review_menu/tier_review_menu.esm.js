@@ -38,10 +38,28 @@ export class TierReviewMenu extends Component {
             trailing: true,
         });
         this.fetchSystrayReviewer();
-        this.busService.subscribe("base.tier.validation/updated", () =>
-            this.debouncedFetch()
-        );
+        this.busService.subscribe("base.tier.validation/updated", (payload) => {
+            // The server pushes this reviewer's authoritative groups in the
+            // payload, so update the badge straight from the message -- no RPC
+            // recount, which is what keeps it realtime and burst-safe (this is
+            // how Odoo's own systray counters work). Fall back to a debounced
+            // recount only for a legacy/empty payload.
+            if (payload && Array.isArray(payload.groups)) {
+                this.applyGroups(payload.groups);
+            } else {
+                this.debouncedFetch();
+            }
+        });
         this.busService.start();
+    }
+
+    applyGroups(groups) {
+        let total = 0;
+        for (const group of groups) {
+            total += group.pending_count || 0;
+        }
+        this.store.tierReviewCounter = total;
+        this.store.tierReviewGroups = groups;
     }
 
     async fetchSystrayReviewer() {
@@ -55,12 +73,7 @@ export class TierReviewMenu extends Component {
         this.fetchRunning = true;
         try {
             const groups = await this.orm.call("res.users", "review_user_count");
-            let total = 0;
-            for (const group of groups) {
-                total += group.pending_count || 0;
-            }
-            this.store.tierReviewCounter = total;
-            this.store.tierReviewGroups = groups;
+            this.applyGroups(groups);
         } finally {
             this.fetchRunning = false;
         }

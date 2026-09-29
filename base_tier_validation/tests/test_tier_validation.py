@@ -1626,3 +1626,18 @@ class TierTierValidationView(CommonTierValidation):
             "changes (a stored field whose value depends on sibling reviews).",
         )
 
+    def test_19e_systray_groups_reflect_can_review(self):
+        """``_review_user_count_groups`` returns the records a user can review
+        now (the authoritative systray count pushed over the bus). The promoted
+        (lowest-sequence pending) review's reviewer sees it; a later tier does
+        not until its predecessor is approved.
+        """
+        test_record = self.test_model.create({"test_field": 3.5})
+        reviews = test_record.request_validation()
+        reviews._update_review_status()
+        pending = reviews.filtered(lambda r: r.status == "pending")
+        self.assertTrue(pending)
+        reviewer = pending.reviewer_ids[:1]
+        groups = reviewer._review_user_count_groups()
+        total = sum(g["pending_count"] for g in groups)
+        self.assertEqual(total, 1, "the promoted reviewer's systray count must be 1")
