@@ -44,8 +44,7 @@ class TierReview(models.Model):
         related="definition_id.model_id",
         store=True,
         string="Model",
-        help="The kind of document this review is for "
-        "(e.g. Journal Entry, Contract).",
+        help="The kind of document this review is for (e.g. Journal Entry, Contract).",
     )
     response_days = fields.Float(
         string="Response time (days)",
