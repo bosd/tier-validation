@@ -172,16 +172,3 @@ class TierValidationBoard(CommonTierValidation):
             .search(Domain("id", "=", self.review.id))
         )
         self.assertFalse(hidden)
-
-    def test_late_state_tracks_open_reviews_only(self):
-        """`late_state` is on_time/late for open reviews and empty once
-        the review is completed -- it drives the kanban count band."""
-        # Fresh open review: on time.
-        self.assertEqual(self.review.late_state, "on_time")
-        later = fields.Datetime.add(fields.Datetime.now(), days=14)
-        with freeze_time(later):
-            self.review.invalidate_recordset(["is_late", "late_state"])
-            self.assertEqual(self.review.late_state, "late")
-            # Completed reviews carry no timeliness state.
-            self.review.write({"status": "approved", "done_by": self.test_user_1.id})
-            self.assertFalse(self.review.late_state)

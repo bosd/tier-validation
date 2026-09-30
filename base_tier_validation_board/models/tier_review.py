@@ -69,14 +69,6 @@ class TierReview(models.Model):
         "the kanban with a 'rotten' colour and available as the 'Late' "
         "filter.",
     )
-    late_state = fields.Selection(
-        selection=[("on_time", "On time"), ("late", "Late")],
-        compute="_compute_late_state",
-        string="Timeliness",
-        help="Whether an open (pending/waiting) review is still within the "
-        "late threshold. Empty once the review is done. Drives the kanban "
-        "count band (progress bar).",
-    )
 
     @api.model
     def _late_after_days(self):
@@ -117,17 +109,6 @@ class TierReview(models.Model):
                 and rec.create_date
                 and rec.create_date < cutoff
             )
-
-    @api.depends("status", "create_date")
-    def _compute_late_state(self):
-        # Only open (pending/waiting) reviews carry an on-time/late state;
-        # completed ones are left empty so the kanban band only tracks the
-        # backlog that can still be acted on.
-        for rec in self:
-            if rec.status in ("waiting", "pending"):
-                rec.late_state = "late" if rec.is_late else "on_time"
-            else:
-                rec.late_state = False
 
     @api.model
     def _search_is_late(self, operator, value):
