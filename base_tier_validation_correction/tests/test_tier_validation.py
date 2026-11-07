@@ -109,7 +109,7 @@ class TierTierValidation(CommonTierValidation):
                 "name": "Snapshot test",
                 "model_id": self.tester_model.id,
                 "correction_type": "reviewer",
-                "search_name": self.test_record.display_name,
+                "document_domain": str([("id", "=", self.test_record.id)]),
                 "new_reviewer_ids": [Command.set(self.test_user_2.ids)],
                 "old_reviewer_ids": [Command.set(self.test_user_1.ids)],
             }
@@ -140,7 +140,7 @@ class TierTierValidation(CommonTierValidation):
                 "name": "Legacy revert",
                 "model_id": self.tester_model.id,
                 "correction_type": "reviewer",
-                "search_name": self.test_record.display_name,
+                "document_domain": str([("id", "=", self.test_record.id)]),
                 "new_reviewer_ids": [Command.set(self.test_user_2.ids)],
             }
         )
