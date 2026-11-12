@@ -1008,3 +1008,25 @@ msgstr ""
 #: code:addons/base_tier_validation/models/tier_validation.py:0
 msgid "the assigned reviewer"
 msgstr ""
+
+#. module: base_tier_validation
+#: model:ir.model.fields.selection,name:base_tier_validation.selection__tier_definition__notify_reminder_type__activity
+msgid "Activity"
+msgstr ""
+
+#. module: base_tier_validation
+#: model:ir.model.fields.selection,name:base_tier_validation.selection__tier_definition__notify_reminder_type__message
+msgid "Message"
+msgstr ""
+
+#. module: base_tier_validation
+#: model:ir.model.fields,field_description:base_tier_validation.field_tier_definition__notify_reminder_type
+msgid "Remind by"
+msgstr ""
+
+#. module: base_tier_validation
+#: model:ir.model.fields,help:base_tier_validation.field_tier_definition__notify_reminder_type
+msgid ""
+"Activity: one to-do per reviewer on the document, refreshed until the review is done. Reviews with several reviewers are reminded by message.\n"
+"Message: a message on the document, without adding to the reviewer's activities."
+msgstr ""

@@ -627,12 +627,12 @@ msgstr "Verwant documentmodel"
 #. module: base_tier_validation
 #: model:ir.model.fields,field_description:base_tier_validation.field_tier_definition__notify_reminder_delay
 msgid "Remind Every (Days)"
-msgstr ""
+msgstr "Herinner elke (dagen)"
 
 #. module: base_tier_validation
 #: model_terms:ir.ui.view,arch_db:base_tier_validation.tier_definition_view_form
 msgid "Remind every"
-msgstr ""
+msgstr "Herinner elke"
 
 #. module: base_tier_validation
 #: model:ir.model.fields,help:base_tier_validation.field_tier_definition__notify_reminder_delay
@@ -1125,10 +1125,6 @@ msgstr ""
 #~ msgstr "Er zijn geen res.users in het geselecteerde veld"
 
 #, python-format
-#~ msgid "Activity"
-#~ msgstr "Activiteit"
-
-#, python-format
 #~ msgid "Operation has been <b>rejected</b>."
 #~ msgstr "Operatie is <b>afgewezen</b>."
 
@@ -1177,3 +1173,27 @@ msgstr ""
 
 #~ msgid "Approve Sequence"
 #~ msgstr "Volgorde goedkeuren"
+
+#. module: base_tier_validation
+#: model:ir.model.fields.selection,name:base_tier_validation.selection__tier_definition__notify_reminder_type__activity
+msgid "Activity"
+msgstr "Activiteit"
+
+#. module: base_tier_validation
+#: model:ir.model.fields.selection,name:base_tier_validation.selection__tier_definition__notify_reminder_type__message
+msgid "Message"
+msgstr "Bericht"
+
+#. module: base_tier_validation
+#: model:ir.model.fields,field_description:base_tier_validation.field_tier_definition__notify_reminder_type
+msgid "Remind by"
+msgstr "Herinneren via"
+
+#. module: base_tier_validation
+#: model:ir.model.fields,help:base_tier_validation.field_tier_definition__notify_reminder_type
+msgid ""
+"Activity: one to-do per reviewer on the document, refreshed until the review is done. Reviews with several reviewers are reminded by message.\n"
+"Message: a message on the document, without adding to the reviewer's activities."
+msgstr ""
+"Activiteit: één taak per beoordelaar op het document, bijgewerkt tot de beoordeling klaar is. Beoordelingen met meerdere beoordelaars krijgen een bericht.\n"
+"Bericht: een bericht aan de beoordelaars, zonder iets toe te voegen aan hun activiteiten."
