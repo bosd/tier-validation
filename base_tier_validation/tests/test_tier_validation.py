@@ -2271,6 +2271,43 @@ class TierTierValidationView(CommonTierValidation):
         self.assertIn(self.test_user_2.display_name, body)
         self.assertIn("may not be able to read", body)
 
+    @mute_logger("odoo.addons.base_tier_validation.models.tier_validation")
+    def test_request_validation_warns_reviewer_hidden_by_record_rule(self):
+        """The reviewer can read the model, but a record rule hides this
+        document from them: the warning still names them."""
+        test_record = self.test_model.create({"test_field": 2.5})
+        self.tier_def_obj.create(
+            {
+                "model_id": self.tester_model.id,
+                "review_type": "individual",
+                "reviewer_id": self.test_user_2.id,
+                "definition_domain": "[('test_field', '>', 1.0)]",
+            }
+        )
+        self.env["ir.rule"].create(
+            {
+                "name": "Reviewer only sees small tests",
+                "model_id": self.tester_model.id,
+                "groups": [Command.link(self.env.ref("base.group_user").id)],
+                "domain_force": "[('test_field', '<', 1.0)]",
+            }
+        )
+        self.env["ir.rule"].create(
+            {
+                "name": "Admins see all tests",
+                "model_id": self.tester_model.id,
+                "groups": [Command.link(self.env.ref("base.group_system").id)],
+                "domain_force": "[(1, '=', 1)]",
+            }
+        )
+        self.assertTrue(self.test_model.with_user(self.test_user_2).has_access("read"))
+        messages_before = test_record.message_ids
+        test_record.with_user(self.test_user_1).request_validation()
+        new_messages = test_record.message_ids - messages_before
+        bodies = " ".join(message.body or "" for message in new_messages)
+        self.assertIn("may not be able to read", bodies)
+        self.assertIn(self.test_user_2.display_name, bodies)
+
     def test_request_validation_no_warning_when_reviewer_has_access(self):
         """No spurious chatter message when reviewers have model access."""
         test_record = self.test_model.create({"test_field": 2.5})

@@ -884,31 +884,25 @@ class TierValidation(models.AbstractModel):
         """Post a chatter message + server warning if any of the reviewers
         assigned to ``reviews`` cannot read the validated record.
 
-        Without this, a tier definition pointing at a model the reviewer
-        has no ``ir.model.access`` read on causes the workflow to stall
-        silently -- the review exists, but the reviewer can't see the
-        document and so can't act on it. The chatter message makes the
-        misconfiguration visible to the requester.
+        Without this, a reviewer who cannot see the document makes the
+        workflow stall silently: the review exists, but the reviewer can't
+        open the document and so can't act on it. The chatter message makes
+        the misconfiguration visible to the requester.
 
-        Model-level ACL only: per-record ``ir.rule`` restrictions are not
-        evaluated here, so false positives are possible. The message is
-        worded as a "may not be able to" warning rather than a guarantee.
+        Checked on the record itself, so record rules count as well as
+        access rights.
         """
-        TierDefinition = self.env["tier.definition"]
         for rec in self:
             rec_reviews = reviews.filtered(lambda r, rec=rec: r.res_id == rec.id)
-            reviewers = rec_reviews.mapped("reviewer_ids")
-            if not reviewers:
-                continue
-            no_access = TierDefinition._reviewers_without_model_access(
-                self._name, reviewers
+            no_access = rec_reviews.reviewer_ids.filtered(
+                lambda user, rec=rec: not rec._reviewer_can_read(user)
             )
             if not no_access:
                 continue
             _logger.warning(
                 "Tier validation requested on %s(%s) but reviewer(s) %s "
-                "cannot read this model; the workflow will stall until "
-                "they get access or are replaced.",
+                "cannot read it; the workflow will stall until they get "
+                "access or are replaced.",
                 rec._name,
                 rec.id,
                 no_access.mapped("login"),
@@ -924,6 +918,15 @@ class TierValidation(models.AbstractModel):
                         reviewers=", ".join(no_access.mapped("display_name")),
                     )
                 )
+
+    def _reviewer_can_read(self, user):
+        """Whether ``user`` can read this record, in any of their companies."""
+        self.ensure_one()
+        return (
+            self.with_context(allowed_company_ids=user.sudo().company_ids.ids)
+            .with_user(user)
+            .has_access("read")
+        )
 
     def _notify_restarted_review_body(self):
         return self.env._("The review has been reset by %s.", self.env.user.name)
