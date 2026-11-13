@@ -4,7 +4,7 @@
 {
     "name": "Contract Tier Validation",
     "summary": "Extends contracts to support a tier validation process",
-    "version": "19.0.1.0.2",
+    "version": "19.0.1.0.3",
     "category": "Contract Management",
     "license": "AGPL-3",
     "author": "bosd, Odoo Community Association (OCA)",
