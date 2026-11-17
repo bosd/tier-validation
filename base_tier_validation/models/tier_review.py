@@ -86,19 +86,6 @@ class TierReview(models.Model):
                 vals["pending_date"] = now
         return super().create(vals_list)
 
-    def write(self, vals):
-        if vals.get("status") == "pending" and "pending_date" not in vals:
-            # Stamp only the reviews that become pending now: a review
-            # written pending again keeps the date it first became so.
-            becoming = self.filtered(lambda r: r.status != "pending")
-            res = super(TierReview, self - becoming).write(vals)
-            if becoming:
-                res = super(TierReview, becoming).write(
-                    dict(vals, pending_date=fields.Datetime.now())
-                )
-            return res
-        return super().write(vals)
-
     @api.depends("status")
     def _compute_display_status(self):
         """
@@ -233,7 +220,26 @@ class TierReview(models.Model):
         return self.sequence == sequence
 
     def write(self, vals):
-        res = super().write(vals)
+        old_reviewers = (
+            {rev: rev.reviewer_ids for rev in self} if "reviewer_ids" in vals else {}
+        )
+        if vals.get("status") == "pending" and "pending_date" not in vals:
+            # Stamp only the reviews that become pending now: a review
+            # written pending again keeps the date it first became so.
+            becoming = self.filtered(lambda r: r.status != "pending")
+            res = super(TierReview, self - becoming).write(vals)
+            if becoming:
+                res = super(TierReview, becoming).write(
+                    dict(vals, pending_date=fields.Datetime.now())
+                )
+        else:
+            res = super().write(vals)
+        if vals.get("status") and vals["status"] != "pending":
+            self.filtered(lambda r: r.status != "pending")._unlink_reminder_activities()
+        for rev, reviewers in old_reviewers.items():
+            removed = reviewers - rev.reviewer_ids
+            if removed:
+                rev._unlink_reminder_activities(removed)
         if "status" in vals:
             # ``can_review`` is stored, but ``_can_review_value`` reads the
             # *other* reviews of the same record (it checks which review holds
@@ -416,19 +422,6 @@ class TierReview(models.Model):
         return self.sudo().search(
             [("model", "=", self.model), ("res_id", "=", self.res_id)]
         )
-
-    def write(self, vals):
-        old_reviewers = (
-            {rev: rev.reviewer_ids for rev in self} if "reviewer_ids" in vals else {}
-        )
-        res = super().write(vals)
-        if vals.get("status") and vals["status"] != "pending":
-            self.filtered(lambda r: r.status != "pending")._unlink_reminder_activities()
-        for rev, reviewers in old_reviewers.items():
-            removed = reviewers - rev.reviewer_ids
-            if removed:
-                rev._unlink_reminder_activities(removed)
-        return res
 
     def unlink(self):
         self._unlink_reminder_activities()
