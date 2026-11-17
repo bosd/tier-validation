@@ -17,6 +17,22 @@
                 decoration-danger="status == 'rejected'"
                 decoration-muted="status == 'cancel'"
             >
+                <header>
+                    <button
+                        name="action_bulk_validate"
+                        type="object"
+                        string="Validate"
+                        class="btn-success"
+                        icon="fa-check"
+                    />
+                    <button
+                        name="action_bulk_reject"
+                        type="object"
+                        string="Reject"
+                        class="btn-danger"
+                        icon="fa-times"
+                    />
+                </header>
                 <!-- The document under review is the point of the row, so it
                      leads and is bold. res_name is the document's display
                      name; model_id shows the human model description. -->
