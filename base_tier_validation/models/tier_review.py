@@ -388,15 +388,22 @@ class TierReview(models.Model):
         return self.env["mail.activity"].sudo().search(domain)
 
     def _unlink_reminder_activities(self, users=None):
-        """Remove the reminders of these reviews, for ``users`` or else all
-        their reviewers, unless the user still has another pending review on
-        the same document."""
+        """Remove the reminders of these reviews, for ``users`` or else of
+        anyone, unless the user still has another pending review on the same
+        document. Without ``users``, this also catches the reminders of a
+        reviewer replaced by a recompute, which skips write()."""
         for rev in self:
             still_pending = rev._get_document_reviews().filtered(
                 lambda r: r not in self and r.status == "pending"
             )
-            to_clear = rev.reviewer_ids if users is None else users
-            rev._get_reminder_activities(to_clear - still_pending.reviewer_ids).unlink()
+            if users is None:
+                rev._get_reminder_activities().filtered(
+                    lambda a, p=still_pending: a.user_id not in p.reviewer_ids
+                ).unlink()
+            else:
+                rev._get_reminder_activities(
+                    users - still_pending.reviewer_ids
+                ).unlink()
 
     def _get_document_reviews(self):
         self.ensure_one()

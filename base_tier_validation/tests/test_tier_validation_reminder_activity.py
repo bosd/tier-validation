@@ -94,6 +94,17 @@ class TestTierValidationReminderActivity(CommonTierValidation):
         self._remind_after(9)
         self.assertEqual(self._reminders().user_id, self.test_user_2)
 
+    def test_validation_reminder_activity_removed_when_validated_after_recompute(
+        self,
+    ):
+        """A reviewer replaced through the definition loses the reminder once
+        the review is validated, even before the next run."""
+        self._request_with_reminder()
+        self.tier_definition.reviewer_id = self.test_user_2
+        self.test_record.with_user(self.test_user_2).validate_tier()
+        self.assertEqual(self.test_record.validation_status, "validated")
+        self.assertFalse(self._reminders())
+
     def test_validation_reminder_activity_duplicates_removed(self):
         """Duplicates from before the fix are removed at the next run."""
         reminder = self._request_with_reminder()
