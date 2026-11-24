@@ -6,3 +6,4 @@ from . import test_tier_validation_reminder
 from . import test_tier_validation_access
 from . import test_tier_review_widget
 from . import test_tier_validation_reminder_activity
+from . import test_tier_definition_change
