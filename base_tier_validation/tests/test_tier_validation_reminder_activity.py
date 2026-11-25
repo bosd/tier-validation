@@ -1,5 +1,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+from unittest.mock import patch
+
 from freezegun import freeze_time
 
 from odoo import fields
@@ -164,3 +166,22 @@ class TestTierValidationReminderActivity(CommonTierValidation):
                 ]
             )
         )
+
+    def test_cron_survives_a_failing_definition(self):
+        """A definition whose reminders raise must not abort the whole run,
+        and its reviews stay due so the next run picks them up."""
+        self.tier_definition.notify_reminder_delay = 3
+        self.test_record.with_user(self.test_user_2.id).request_validation()
+        review = self.test_record.review_ids
+        with patch.object(
+            type(review),
+            "_send_review_reminder",
+            side_effect=ValueError("reminder blew up"),
+        ):
+            self._remind_after(4)
+        self.assertFalse(self._reminders())
+        # Nothing was marked as reminded, so the review is still due.
+        self.assertFalse(review.last_reminder_date)
+        self._remind_after(5)
+        self.assertEqual(self._reminders().user_id, self.test_user_1)
+        self.assertTrue(review.last_reminder_date)

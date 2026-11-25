@@ -1,9 +1,13 @@
 # Copyright 2017 ForgeFlow S.L. (https://www.forgeflow.com)
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+import logging
+
 from odoo import api, fields, models
 from odoo.exceptions import AccessError
 from odoo.fields import Domain
+
+_logger = logging.getLogger(__name__)
 
 
 class TierDefinition(models.Model):
@@ -254,10 +258,42 @@ class TierDefinition(models.Model):
         )
 
     def _cron_send_review_reminder(self):
+        """Remind the reviewers of the reviews that are due, a definition at
+        a time.
+
+        Since 19.0 a cron reports its progress and is rescheduled when it runs
+        out of time, instead of being expected to finish in one go. Doing the
+        whole backlog in a single transaction is what makes this cron fail on a
+        busy database: the worker kills the run on its time limit, the whole
+        transaction is rolled back, and every reminder that had already been
+        sent is due again on the next run. The backlog then only grows, every
+        following run is killed as well, and Odoo deactivates the cron after
+        enough consecutive failures.
+
+        So commit per definition and stop while there is still time left: a
+        long backlog drains over several runs, and what is done stays done.
+        """
         definition_with_reminder = self.env["tier.definition"].search(
             Domain("notify_reminder_delay", ">", 0)
         )
+        remaining = len(definition_with_reminder)
+        time_left = self._commit_progress(remaining=remaining)
         for record in definition_with_reminder:
-            review_to_remind = record._get_review_needing_reminder()
-            if review_to_remind:
-                review_to_remind._send_review_reminder()
+            try:
+                review_to_remind = record._get_review_needing_reminder()
+                if review_to_remind:
+                    review_to_remind._send_review_reminder()
+            except Exception:  # noqa: BLE001
+                # One definition must not cost the whole run. Its reviews keep
+                # the last_reminder_date they had, so they are due again next
+                # time and nothing is silently skipped forever.
+                _logger.exception(
+                    "Could not send the reminders of tier definition %s (%s)",
+                    record.id,
+                    record.display_name,
+                )
+                self.env.cr.rollback()
+            remaining -= 1
+            time_left = self._commit_progress(1, remaining=remaining)
+            if not time_left:
+                break
