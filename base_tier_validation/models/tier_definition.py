@@ -258,16 +258,6 @@ class TierDefinition(models.Model):
             )
         )
 
-    def _count_reviews_needing_reminder(self):
-        """How many reviews are due a reminder, behind the capped page that
-        _get_review_needing_reminder returns. The cron reports this as the
-        remaining count, which is what makes the worker come back for the
-        rest of a backlog within the same run."""
-        domain = self._reviews_needing_reminder_domain()
-        if domain is None:
-            return 0
-        return self.env["tier.review"].search_count(domain)
-
     def _get_review_needing_reminder(self):
         """Return all the reviews that have the reminder setup."""
         domain = self._reviews_needing_reminder_domain()
@@ -291,48 +281,47 @@ class TierDefinition(models.Model):
         following run is killed as well, and Odoo deactivates the cron after
         enough consecutive failures.
 
-        So commit per definition and stop while there is still time left. The
-        remaining count is in reviews, not definitions, because each
-        definition only hands out REMINDERS_PER_DEFINITION at a time: as long
-        as reviews are left the worker calls this again inside the same run,
-        and when the time runs out the job is rescheduled ASAP with what is
-        done kept.
+        So report progress per definition, which commits it, and stop while
+        there is still time left. A killed run then costs at most the
+        definition it was busy with instead of everything it had done.
         """
         cron = self.env["ir.cron"]
+        # _commit_progress commits the cursor, and a test forbids that, so
+        # only report progress when a cron runner actually handed us a
+        # progress record to report into.
+        in_cron = bool(self.env.context.get("ir_cron_progress_id"))
         definition_with_reminder = self.env["tier.definition"].search(
             Domain("notify_reminder_delay", ">", 0)
         )
-        remaining = sum(
-            record._count_reviews_needing_reminder()
-            for record in definition_with_reminder
-        )
-        time_left = cron._commit_progress(remaining=remaining)
+        remaining = len(definition_with_reminder)
+        time_left = cron._commit_progress(remaining=remaining) if in_cron else None
+        final_exception = None
         for record in definition_with_reminder:
-            if not time_left:
+            if in_cron and not time_left:
                 break
-            # Read before the try: after a database error the cursor is
-            # aborted and any field read that is not already cached would
-            # raise again from inside the except.
+            # Read before the try: a savepoint rollback clears the cache, and
+            # the label is wanted precisely when something went wrong.
             label = (record.id, record.display_name)
             try:
-                review_to_remind = record._get_review_needing_reminder()
-                processed = len(review_to_remind)
-                if review_to_remind:
-                    review_to_remind._send_review_reminder()
-            except Exception:  # noqa: BLE001
-                # One definition must not cost the whole run. Roll back first,
-                # so logging cannot hit an aborted cursor.
-                self.env.cr.rollback()
+                # A savepoint, not cr.rollback(): one definition that raises
+                # must not take the rest of the run with it, and rolling back
+                # the cursor itself is both forbidden in a test and would
+                # discard a caller's uncommitted work outside a cron.
+                with self.env.cr.savepoint():
+                    review_to_remind = record._get_review_needing_reminder()
+                    if review_to_remind:
+                        review_to_remind._send_review_reminder()
+            except Exception as exc:  # noqa: BLE001
                 _logger.exception(
                     "Could not send the reminders of tier definition %s (%s)",
                     *label,
                 )
-                # Give up on this definition for this run rather than letting
-                # the worker come back to it until the time budget is gone.
-                # Its reviews keep their last_reminder_date, so they are due
-                # again on the next run; the traceback above is the signal.
-                remaining = max(remaining - record._count_reviews_needing_reminder(), 0)
-                processed = 0
-            else:
-                remaining = max(remaining - processed, 0)
-            time_left = cron._commit_progress(processed, remaining=remaining)
+                final_exception = exc
+            remaining -= 1
+            if in_cron:
+                time_left = cron._commit_progress(1, remaining=remaining)
+        if final_exception is not None:
+            # Raise the last one so the job is marked as failing and shows up
+            # outside the log, as base_automation's time-based cron does. The
+            # definitions that did work have already committed their progress.
+            raise final_exception

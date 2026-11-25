@@ -199,20 +199,26 @@ class TestTierValidationReminderActivity(CommonTierValidation):
         self.assertFalse(self._reminders())
 
     def test_cron_survives_a_failing_definition(self):
-        """A definition whose reminders raise must not abort the whole run,
-        and its reviews stay due so the next run picks them up."""
+        """A definition whose reminders raise is rolled back to its savepoint
+        and the run carries on; the exception surfaces at the end so the job
+        is marked as failing, and its reviews stay due for the next run."""
         self.tier_definition.notify_reminder_delay = 3
         self.test_record.with_user(self.test_user_2.id).request_validation()
         review = self.test_record.review_ids
-        with patch.object(
-            type(review),
-            "_send_review_reminder",
-            side_effect=ValueError("reminder blew up"),
+        with (
+            patch.object(
+                type(review),
+                "_send_review_reminder",
+                side_effect=ValueError("reminder blew up"),
+            ),
+            self.assertRaises(ValueError),
         ):
             self._remind_after(4)
+        # The savepoint took the failed definition's work back out, and
+        # nothing was stamped, so the review is still due.
         self.assertFalse(self._reminders())
-        # Nothing was marked as reminded, so the review is still due.
         self.assertFalse(review.last_reminder_date)
+        # A healthy run afterwards picks it up as usual.
         self._remind_after(5)
         self.assertEqual(self._reminders().user_id, self.test_user_1)
         self.assertTrue(review.last_reminder_date)
