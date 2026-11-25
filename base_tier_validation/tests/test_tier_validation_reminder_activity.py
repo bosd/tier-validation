@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from freezegun import freeze_time
 
-from odoo import fields
+from odoo import Command, fields
 from odoo.orm.model_classes import add_to_registry
 from odoo.tests.common import tagged
 
@@ -166,6 +166,37 @@ class TestTierValidationReminderActivity(CommonTierValidation):
                 ]
             )
         )
+
+    def test_validation_reminder_activity_removed_after_recompute_to_group(self):
+        """A definition switched to a group recomputes the reviewers without
+        write(), and a review with several reviewers is reminded in the
+        chatter -- so the activity branch is never taken. The replaced
+        reviewer still loses the reminder at the next run."""
+        self._request_with_reminder()
+        group = self.env["res.groups"].create(
+            {
+                "name": "TestGroupWithoutTheOldReviewer",
+                "user_ids": [
+                    Command.link(self.test_user_2.id),
+                    Command.link(self.test_user_3_multi_company.id),
+                ],
+            }
+        )
+        self.tier_definition.write(
+            {
+                "review_type": "group",
+                "reviewer_id": False,
+                "reviewer_group_id": group.id,
+            }
+        )
+        self.assertEqual(
+            self.test_record.review_ids.reviewer_ids,
+            self.test_user_2 + self.test_user_3_multi_company,
+        )
+        # The recompute left the old reviewer's reminder behind.
+        self.assertEqual(self._reminders().user_id, self.test_user_1)
+        self._remind_after(9)
+        self.assertFalse(self._reminders())
 
     def test_cron_survives_a_failing_definition(self):
         """A definition whose reminders raise must not abort the whole run,
