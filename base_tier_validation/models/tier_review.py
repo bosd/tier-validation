@@ -314,6 +314,11 @@ class TierReview(models.Model):
         return self.env._("A review has been requested %s days ago.", delay)
 
     def _send_review_reminder(self):
+        """Remind the reviewers, and return the reviews that were actually
+        reminded. An orphan, whose document is gone, is skipped and is not
+        part of the result: the caller needs to tell real work apart from a
+        page of reviews that can never be done."""
+        reminded = self.browse()
         for rev in self:
             record = self.env[rev.model].browse(rev.res_id)
             if not record.exists():  # <-- skip orphaned reviews
@@ -341,6 +346,8 @@ class TierReview(models.Model):
                 msg = f"Could not send reminder for record {record}"
                 _logger.exception(msg)
             rev.last_reminder_date = fields.Datetime.now()
+            reminded |= rev
+        return reminded
 
     def _notify_review_reminder(self, record):
         """Remind the reviewers of this review, and nobody else.

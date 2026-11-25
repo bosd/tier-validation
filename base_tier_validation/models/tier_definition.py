@@ -238,16 +238,15 @@ class TierDefinition(models.Model):
                 rec.model, IrModelFields
             )
 
-    def _reviews_needing_reminder_domain(self):
-        """Domain of the reviews of this definition that are due a reminder,
-        or ``None`` when it has no reminder set up."""
+    def _get_review_needing_reminder(self):
+        """Return all the reviews that have the reminder setup."""
         self.ensure_one()
         if not self.notify_reminder_delay:
-            return None
+            return self.env["tier.review"]
         review_date = fields.Datetime.subtract(
             fields.Datetime.now(), days=self.notify_reminder_delay
         )
-        return (
+        domain = (
             Domain("definition_id", "=", self.id)
             # A waiting review is not the reviewer's turn yet: nothing to remind.
             & Domain("status", "=", "pending")
@@ -257,12 +256,6 @@ class TierDefinition(models.Model):
                 | Domain("last_reminder_date", "<", review_date)
             )
         )
-
-    def _get_review_needing_reminder(self):
-        """Return all the reviews that have the reminder setup."""
-        domain = self._reviews_needing_reminder_domain()
-        if domain is None:
-            return self.env["tier.review"]
         return self.env["tier.review"].search(
             domain,
             limit=REMINDERS_PER_DEFINITION,
@@ -283,7 +276,9 @@ class TierDefinition(models.Model):
 
         So report progress per definition, which commits it, and stop while
         there is still time left. A killed run then costs at most the
-        definition it was busy with instead of everything it had done.
+        definition it was busy with instead of everything it had done, and a
+        definition with more due reviews than it hands out at once is left in
+        the count so the worker comes back for the rest.
         """
         cron = self.env["ir.cron"]
         # _commit_progress commits the cursor, and a test forbids that, so
@@ -295,6 +290,7 @@ class TierDefinition(models.Model):
         )
         remaining = len(definition_with_reminder)
         time_left = cron._commit_progress(remaining=remaining) if in_cron else None
+        succeeded = 0
         final_exception = None
         for record in definition_with_reminder:
             if in_cron and not time_left:
@@ -302,6 +298,7 @@ class TierDefinition(models.Model):
             # Read before the try: a savepoint rollback clears the cache, and
             # the label is wanted precisely when something went wrong.
             label = (record.id, record.display_name)
+            unfinished = False
             try:
                 # A savepoint, not cr.rollback(): one definition that raises
                 # must not take the rest of the run with it, and rolling back
@@ -309,19 +306,35 @@ class TierDefinition(models.Model):
                 # discard a caller's uncommitted work outside a cron.
                 with self.env.cr.savepoint():
                     review_to_remind = record._get_review_needing_reminder()
-                    if review_to_remind:
-                        review_to_remind._send_review_reminder()
+                    reminded = review_to_remind._send_review_reminder()
+                    # A full page that actually reminded someone probably has
+                    # more behind it, so keep this definition in the count and
+                    # the worker returns for the rest. A page that reminded
+                    # nobody must not be kept: an orphaned review, whose
+                    # document is gone, is skipped by design and never leaves
+                    # the due domain, so the job would spin on it until its
+                    # whole time budget was gone.
+                    unfinished = (
+                        len(review_to_remind) == REMINDERS_PER_DEFINITION
+                        and bool(reminded)
+                    )
+                succeeded += 1
             except Exception as exc:  # noqa: BLE001
                 _logger.exception(
                     "Could not send the reminders of tier definition %s (%s)",
                     *label,
                 )
                 final_exception = exc
-            remaining -= 1
+            if not unfinished:
+                remaining -= 1
             if in_cron:
-                time_left = cron._commit_progress(1, remaining=remaining)
-        if final_exception is not None:
-            # Raise the last one so the job is marked as failing and shows up
-            # outside the log, as base_automation's time-based cron does. The
-            # definitions that did work have already committed their progress.
+                time_left = cron._commit_progress(
+                    0 if unfinished else 1, remaining=remaining
+                )
+        if final_exception is not None and not succeeded:
+            # Only when the whole run achieved nothing. A single broken
+            # definition must not mark the job as failing: five failures over
+            # seven days deactivate the cron, and then no definition is
+            # reminded at all any more. For that one the traceback above is
+            # the signal; this raise is for a run that got nowhere.
             raise final_exception
