@@ -318,6 +318,15 @@ class TierReview(models.Model):
             record = self.env[rev.model].browse(rev.res_id)
             if not record.exists():  # <-- skip orphaned reviews
                 continue
+            # Reminders this document no longer needs go first, whichever way
+            # it gets reminded. A reviewer replaced by a recompute (which
+            # skips write()) keeps an activity nobody is waiting on, and
+            # leaving the cleanup to the activity branch below never clears
+            # it: that branch is only taken for a single reviewer, so a
+            # definition pointing at a group of two leaves the old reviewer's
+            # activity standing forever.
+            if hasattr(record, "activity_ids"):
+                rev._unlink_stale_reminder_activities()
             # Only schedule activity if reviewer is a single user and model
             # has activities.
             if (
@@ -349,16 +358,30 @@ class TierReview(models.Model):
             body=self._notify_review_reminder_body(),
         )
 
+    def _unlink_stale_reminder_activities(self):
+        """Remove the reminder activities on this review's document that no
+        pending reviewer of that document is waiting on.
+
+        Called for every reminder, not only the ones that end up as an
+        activity, because a document whose reviewers were replaced by a
+        recompute is reminded through the message branch and would otherwise
+        keep the old reviewer's activity for good.
+        """
+        self.ensure_one()
+        pending = self._get_document_reviews().filtered(lambda r: r.status == "pending")
+        self._get_reminder_activities().filtered(
+            lambda a: a.user_id not in pending.reviewer_ids
+        ).unlink()
+
     def _schedule_review_reminder_activity(self, record):
         # One reminder per reviewer and document: refresh the open one
-        # instead of adding another one every time the cron runs. Reminders
-        # this document no longer needs go first: older duplicates, and
-        # those of a reviewer replaced by a recompute, which skips write().
-        pending = self._get_document_reviews().filtered(lambda r: r.status == "pending")
+        # instead of adding another one every time the cron runs. The
+        # reminders this document no longer needs are already gone, see
+        # _unlink_stale_reminder_activities; older duplicates of my own go
+        # here.
         reminders = self._get_reminder_activities()
         mine = reminders.filtered(lambda a: a.user_id == self.reviewer_ids)
-        stale = reminders.filtered(lambda a: a.user_id not in pending.reviewer_ids)
-        (stale | mine[1:]).unlink()
+        mine[1:].unlink()
         activity = mine[:1]
         if activity:
             activity.note = self._notify_review_reminder_body()
