@@ -9,6 +9,10 @@ from odoo.fields import Domain
 
 _logger = logging.getLogger(__name__)
 
+# Reviews reminded per definition per call. The cron reports what is left
+# so the worker comes back for the rest instead of doing it all at once.
+REMINDERS_PER_DEFINITION = 50
+
 
 class TierDefinition(models.Model):
     _name = "tier.definition"
@@ -234,15 +238,16 @@ class TierDefinition(models.Model):
                 rec.model, IrModelFields
             )
 
-    def _get_review_needing_reminder(self):
-        """Return all the reviews that have the reminder setup."""
+    def _reviews_needing_reminder_domain(self):
+        """Domain of the reviews of this definition that are due a reminder,
+        or ``None`` when it has no reminder set up."""
         self.ensure_one()
         if not self.notify_reminder_delay:
-            return self.env["tier.review"]
+            return None
         review_date = fields.Datetime.subtract(
             fields.Datetime.now(), days=self.notify_reminder_delay
         )
-        domain = (
+        return (
             Domain("definition_id", "=", self.id)
             # A waiting review is not the reviewer's turn yet: nothing to remind.
             & Domain("status", "=", "pending")
@@ -252,9 +257,25 @@ class TierDefinition(models.Model):
                 | Domain("last_reminder_date", "<", review_date)
             )
         )
+
+    def _count_reviews_needing_reminder(self):
+        """How many reviews are due a reminder, behind the capped page that
+        _get_review_needing_reminder returns. The cron reports this as the
+        remaining count, which is what makes the worker come back for the
+        rest of a backlog within the same run."""
+        domain = self._reviews_needing_reminder_domain()
+        if domain is None:
+            return 0
+        return self.env["tier.review"].search_count(domain)
+
+    def _get_review_needing_reminder(self):
+        """Return all the reviews that have the reminder setup."""
+        domain = self._reviews_needing_reminder_domain()
+        if domain is None:
+            return self.env["tier.review"]
         return self.env["tier.review"].search(
             domain,
-            limit=50,
+            limit=REMINDERS_PER_DEFINITION,
         )
 
     def _cron_send_review_reminder(self):
@@ -263,37 +284,55 @@ class TierDefinition(models.Model):
 
         Since 19.0 a cron reports its progress and is rescheduled when it runs
         out of time, instead of being expected to finish in one go. Doing the
-        whole backlog in a single transaction is what makes this cron fail on a
-        busy database: the worker kills the run on its time limit, the whole
+        whole backlog in a single transaction is what makes this cron fail on
+        a busy database: the worker kills the run on its time limit, the whole
         transaction is rolled back, and every reminder that had already been
         sent is due again on the next run. The backlog then only grows, every
         following run is killed as well, and Odoo deactivates the cron after
         enough consecutive failures.
 
-        So commit per definition and stop while there is still time left: a
-        long backlog drains over several runs, and what is done stays done.
+        So commit per definition and stop while there is still time left. The
+        remaining count is in reviews, not definitions, because each
+        definition only hands out REMINDERS_PER_DEFINITION at a time: as long
+        as reviews are left the worker calls this again inside the same run,
+        and when the time runs out the job is rescheduled ASAP with what is
+        done kept.
         """
+        cron = self.env["ir.cron"]
         definition_with_reminder = self.env["tier.definition"].search(
             Domain("notify_reminder_delay", ">", 0)
         )
-        remaining = len(definition_with_reminder)
-        time_left = self._commit_progress(remaining=remaining)
+        remaining = sum(
+            record._count_reviews_needing_reminder()
+            for record in definition_with_reminder
+        )
+        time_left = cron._commit_progress(remaining=remaining)
         for record in definition_with_reminder:
+            if not time_left:
+                break
+            # Read before the try: after a database error the cursor is
+            # aborted and any field read that is not already cached would
+            # raise again from inside the except.
+            label = (record.id, record.display_name)
             try:
                 review_to_remind = record._get_review_needing_reminder()
+                processed = len(review_to_remind)
                 if review_to_remind:
                     review_to_remind._send_review_reminder()
             except Exception:  # noqa: BLE001
-                # One definition must not cost the whole run. Its reviews keep
-                # the last_reminder_date they had, so they are due again next
-                # time and nothing is silently skipped forever.
+                # One definition must not cost the whole run. Roll back first,
+                # so logging cannot hit an aborted cursor.
+                self.env.cr.rollback()
                 _logger.exception(
                     "Could not send the reminders of tier definition %s (%s)",
-                    record.id,
-                    record.display_name,
+                    *label,
                 )
-                self.env.cr.rollback()
-            remaining -= 1
-            time_left = self._commit_progress(1, remaining=remaining)
-            if not time_left:
-                break
+                # Give up on this definition for this run rather than letting
+                # the worker come back to it until the time budget is gone.
+                # Its reviews keep their last_reminder_date, so they are due
+                # again on the next run; the traceback above is the signal.
+                remaining = max(remaining - record._count_reviews_needing_reminder(), 0)
+                processed = 0
+            else:
+                remaining = max(remaining - processed, 0)
+            time_left = cron._commit_progress(processed, remaining=remaining)
